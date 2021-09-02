@@ -31,10 +31,8 @@
 # 1.1		2019-12-13	Schema support
 # 1.2		2020-05-20	FK support
 # 1.3		2021-03-25  Use persist-name on relations for custom-named FK
+# 1.4		2021-08-09	Support for length persistence attribute
 
-
-# copyrightFile = new File(JavaDesignerModule.getInstance().getModuleContext().getProjectStructure().getPath().toFile(), path); 
-# path = module.getModuleContext().getConfiguration().getParameterValue (JavaDesignerParameters.GENERATIONPATH);
 
 import os
 import errno
@@ -122,11 +120,14 @@ def checkIdAttrib(element):
 
 
 
-def javaTypes(tip):
+def javaTypes(tip,nullable):
 	if tip==Modelio.getInstance().getModelingSession().getModel().getUmlTypes().getSTRING():
 		return "String"
 	if tip==Modelio.getInstance().getModelingSession().getModel().getUmlTypes().getLONG():
-		return "long"
+		if nullable=="false":
+			return "long"
+		else:
+			return "Long"
 	if tip==Modelio.getInstance().getModelingSession().getModel().getUmlTypes().getBOOLEAN():
 		return "Boolean"
 	if tip==Modelio.getInstance().getModelingSession().getModel().getUmlTypes().getDATE():
@@ -134,14 +135,16 @@ def javaTypes(tip):
 	if tip==Modelio.getInstance().getModelingSession().getModel().getUmlTypes().getFLOAT():
 		return "Float"
 	if tip==Modelio.getInstance().getModelingSession().getModel().getUmlTypes().getINTEGER():
-		return "Integer"
+		if nullable=="false":
+			return "int"
+		else:
+			return "Integer"
 	if tip==Modelio.getInstance().getModelingSession().getModel().getUmlTypes().getBYTE():
 		return "byte[]"
 
 
 
 def printAttrib(element,attribStream,methodStream):
-	attribStream.append("\tprivate " + javaTypes(element.getType()) +  " "+element.getName()+";\n");
 	if checkIdAttrib(element):
 		methodStream.append("\t@Id\n");
 		methodStream.append("\t@GeneratedValue(strategy = GenerationType.IDENTITY)\n\n");
@@ -165,19 +168,27 @@ def printAttrib(element,attribStream,methodStream):
 							vunique = "true"
 						else:
 							vnullable = "false"
+	attribStream.append("\tprivate " + javaTypes(element.getType(),vnullable) +  " "+element.getName()+";\n");
 	nullString = ""
 	if vnullable=="false":
 		nullString = ", nullable = "+vnullable
 	uniqueString = ""
 	if vunique=="true":
 		uniqueString = ", unique = "+vunique
-	if javaTypes(element.getType())=="Date":
+	precisionString = ""
+	for tag in element.getTag():
+		dt=tag.getDefinition()
+		if (dt.getName()=="persistent.property.length"):
+			for da in tag.getActual():
+				precisionString = precisionString + ", length = " + da.getValue()
+	
+	if javaTypes(element.getType(),vnullable)=="Date":
 		methodStream.append("\t@Temporal(TemporalType.TIMESTAMP)\n")
-	methodStream.append("\t@Column(name = \"" + toDBName(element.getName()) + "\"" + uniqueString + nullString + ")\n")
-	methodStream.append("\tpublic " + javaTypes(element.getType()) + " get" + capt(element.getName()) + "() {\n");
+	methodStream.append("\t@Column(name = \"" + toDBName(element.getName()) + "\"" + uniqueString + nullString + precisionString + ")\n")
+	methodStream.append("\tpublic " + javaTypes(element.getType(),vnullable) + " get" + capt(element.getName()) + "() {\n");
 	methodStream.append("\t\treturn this."+element.getName()+";\n");
 	methodStream.append("\t}\n\n");
-	methodStream.append("\tpublic void set" + capt(element.getName()) +"(" + javaTypes(element.getType()) + " " + element.getName() + ") {\n");
+	methodStream.append("\tpublic void set" + capt(element.getName()) +"(" + javaTypes(element.getType(),vnullable) + " " + element.getName() + ") {\n");
 	methodStream.append("\t\tthis." + element.getName() + "=" + element.getName() + ";\n");
 	methodStream.append("\t}\n\n")
 
@@ -230,10 +241,9 @@ def packageFullName(element):
 
 projectPath=Modelio.getInstance().getContext().getProjectSpacePath().toString()
 genPath=Modelio.getInstance().getModuleService().getPeerModule("JavaDesigner").getConfiguration().getParameterValue("GenerationPath")
+copyPath=Modelio.getInstance().getModuleService().getPeerModule("JavaDesigner").getConfiguration().getParameterValue("CopyrightFile")
 fullpath = unicode.replace(genPath,"$(Project)",projectPath)
-print projectPath
-print genPath
-print fullpath
+
 print "-------------------"
 for el in selectedElements:
 	print el.getName();
@@ -243,6 +253,10 @@ for el in selectedElements:
 		print " - "+pathfullname
 		make_sure_path_exists(pathfullname)
 		srcFile = open( pathfullname +"/" + el.getName() + ".java", "w")
+		copyFile = open(copyPath, "r")
+		for line in copyFile:
+			srcFile.write(line)
+		copyFile.close()
 		srcFile.write( "package " + pfullname + ";\n\n" )
 		srcFile.write( "import java.util.*;\n" )
 		srcFile.write( "import javax.persistence.*;\n\n" )
@@ -260,4 +274,6 @@ for el in selectedElements:
 		srcFile.writelines(methods);
 		srcFile.write( "}\n")
 		srcFile.close()
+print "=========================="
+print fullpath
 print "=========================="
